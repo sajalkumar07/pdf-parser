@@ -1,3 +1,5 @@
+/* eslint-disable react/no-unescaped-entities */
+
 "use client";
 import { useState, useEffect } from "react";
 import {
@@ -785,7 +787,7 @@ export default function JobApplicationPlatform() {
                 ) : (
                   <div className="space-y-2 text-sm text-black">
                     <p>Add School (e.g. Boston University)</p>
-                    <p>Add Degree (e.g. Bachelor's)</p>
+                    <p>Add Degree (e.g. Bachelor&apos;s)</p>
                     <p>Add Field of Study (e.g. Business)</p>
                     <p>Add Your Starting Date</p>
                     <p>Add Ending Date (or expected)</p>
