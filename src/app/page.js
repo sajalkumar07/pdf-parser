@@ -9,21 +9,56 @@ import {
   Loader2,
   ArrowLeft,
   Download,
+  Edit,
+  Save,
+  Plus,
+  X,
+  Trash2,
 } from "lucide-react";
 
 export default function JobApplicationPlatform() {
   const [page, setPage] = useState("job");
   const [file, setFile] = useState(null);
-  const [data, setData] = useState(null);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [ready, setReady] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [editData, setEditData] = useState(null);
   const [formData, setFormData] = useState({
     fullName: "",
     email: "",
   });
+  const [data, setData] = useState({
+    info: {
+      name: "",
+      email: "",
+      phone: "",
+      links: {
+        linkedin: "",
+        github: "",
+        portfolio: "",
+      },
+    },
+    skills: [],
+    experience: [],
+    education: [],
+    projects: [], // Ensure projects array exists
+    summary: "",
+  });
 
+  // Load data from localStorage on component mount
   useEffect(() => {
+    const savedData = localStorage.getItem("resumeData");
+    const savedFormData = localStorage.getItem("applicationFormData");
+
+    if (savedData) {
+      setData(JSON.parse(savedData));
+    }
+    if (savedFormData) {
+      setFormData(JSON.parse(savedFormData));
+    }
+
     const script = document.createElement("script");
     script.src =
       "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
@@ -37,6 +72,17 @@ export default function JobApplicationPlatform() {
     document.body.appendChild(script);
     return () => document.body.removeChild(script);
   }, []);
+
+  // Save data to localStorage whenever data changes
+  useEffect(() => {
+    if (data) {
+      localStorage.setItem("resumeData", JSON.stringify(data));
+    }
+  }, [data]);
+
+  useEffect(() => {
+    localStorage.setItem("applicationFormData", JSON.stringify(formData));
+  }, [formData]);
 
   const extractTextFromPDF = async (file) => {
     try {
@@ -67,7 +113,6 @@ export default function JobApplicationPlatform() {
     // Extract basic info with improved patterns
     const email = text.match(/[\w\.-]+@[\w\.-]+\.\w+/)?.[0] || "";
 
-    // Improved phone number matching
     const phoneMatch = text.match(
       /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/
     );
@@ -90,7 +135,6 @@ export default function JobApplicationPlatform() {
       }
     }
 
-    // If no name found with uppercase pattern, try first non-empty line
     if (!name && lines.length > 0) {
       name = lines[0];
     }
@@ -117,7 +161,6 @@ export default function JobApplicationPlatform() {
           let sectionStart = headerIndex + h.length;
           let sectionEnd = text.length;
 
-          // Find the next major section
           const nextSections = [
             "EXPERIENCE",
             "EDUCATION",
@@ -147,22 +190,18 @@ export default function JobApplicationPlatform() {
       return "";
     };
 
-    // Parse Skills section with improved handling
+    // Parse Skills section
     const skillSection = getSection(["SKILLS", "TECHNICAL SKILLS"]);
     const skills = new Set();
 
     if (skillSection) {
-      // Split by lines and process each line
       const skillLines = skillSection.split("\n").filter((line) => line.trim());
 
       skillLines.forEach((line) => {
-        // Remove category labels and process the actual skills
         const cleanLine = line.replace(
           /^(Frontend|Backend|Languages|Tools|Technologies)[:\s]*/i,
           ""
         );
-
-        // Split by common separators
         const lineSkills = cleanLine
           .split(/[,|•\-·]|:\s*/)
           .map((s) => s.trim())
@@ -177,7 +216,7 @@ export default function JobApplicationPlatform() {
       });
     }
 
-    // Parse Experience section with improved structure
+    // Parse Experience section
     const expSection = getSection([
       "EXPERIENCE",
       "WORK EXPERIENCE",
@@ -192,13 +231,11 @@ export default function JobApplicationPlatform() {
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
 
-        // Look for job title pattern (often at start of line, may have company and date)
         if (
           line.match(
             /[A-Z][a-z]+(\s+[A-Z][a-z]+)*\s*(?:Developer|Engineer|Specialist|Manager|Intern)/i
           )
         ) {
-          // If we have a previous experience, save it
           if (currentExp && (currentExp.title || currentExp.company)) {
             experience.push(currentExp);
           }
@@ -210,7 +247,6 @@ export default function JobApplicationPlatform() {
             desc: [],
           };
 
-          // Extract period
           const periodMatch = line.match(
             /(\d{1,2}\/\d{4}\s*[–\-]\s*(?:present|current|\d{1,2}\/\d{4}))/i
           );
@@ -218,7 +254,6 @@ export default function JobApplicationPlatform() {
             currentExp.period = periodMatch[0];
           }
 
-          // Extract title and company
           const cleanLine = line
             .replace(periodMatch ? periodMatch[0] : "", "")
             .trim();
@@ -234,9 +269,7 @@ export default function JobApplicationPlatform() {
           } else if (parts.length === 1) {
             currentExp.title = parts[0];
           }
-        }
-        // Look for bullet points or descriptions
-        else if (
+        } else if (
           currentExp &&
           (line.startsWith("•") ||
             line.startsWith("-") ||
@@ -247,9 +280,7 @@ export default function JobApplicationPlatform() {
           if (cleanDesc && !cleanDesc.match(/(present|current|\d{4})/i)) {
             currentExp.desc.push(cleanDesc);
           }
-        }
-        // Company name might be on next line
-        else if (
+        } else if (
           currentExp &&
           !currentExp.company &&
           line.match(/[A-Z][a-zA-Z\s&]+/)
@@ -258,7 +289,6 @@ export default function JobApplicationPlatform() {
         }
       }
 
-      // Don't forget the last experience
       if (currentExp && (currentExp.title || currentExp.company)) {
         experience.push(currentExp);
       }
@@ -275,7 +305,6 @@ export default function JobApplicationPlatform() {
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
 
-        // Look for degree patterns
         if (
           line.match(
             /(B\.Tech|B\.E|B\.S|M\.Tech|M\.S|Bachelor|Master|Diploma)/i
@@ -291,24 +320,18 @@ export default function JobApplicationPlatform() {
             year: "",
             location: "",
           };
-        }
-        // Look for school names
-        else if (
+        } else if (
           currentEdu &&
           !currentEdu.school &&
           line.match(/(University|College|Institute|School|Academy)/i)
         ) {
           currentEdu.school = line.trim();
-        }
-        // Look for year
-        else if (currentEdu && !currentEdu.year) {
+        } else if (currentEdu && !currentEdu.year) {
           const yearMatch = line.match(/(19|20)\d{2}/);
           if (yearMatch) {
             currentEdu.year = yearMatch[0];
           }
-        }
-        // Look for location (usually shorter text)
-        else if (
+        } else if (
           currentEdu &&
           !currentEdu.location &&
           line.length < 30 &&
@@ -323,53 +346,117 @@ export default function JobApplicationPlatform() {
       }
     }
 
-    // Parse Projects section
-    const projectsSection = getSection(["PROJECTS", "PERSONAL PROJECTS"]);
+    // Parse Projects section - IMPROVED
+    // Parse Projects section - FIXED and IMPROVED
+    const projectsSection = getSection([
+      "PROJECTS",
+      "PERSONAL PROJECTS",
+      "PROJECT EXPERIENCE",
+    ]);
     const projects = [];
 
     if (projectsSection) {
       const lines = projectsSection.split("\n").filter((l) => l.trim());
       let currentProject = null;
+      let inProjectSection = false;
 
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
+        const trimmedLine = line.trim();
 
-        // Project names often start the line, might have icons or bold formatting indicators
+        // More flexible project detection - look for project-like titles
         if (
-          line.match(/[A-Z][A-Za-z\s]+(?:\s*🔴)?$/) &&
-          line.length < 100 &&
-          !line.startsWith("•") &&
-          !line.startsWith("-")
+          // Project title patterns
+          (trimmedLine.length > 3 &&
+            trimmedLine.length < 100 &&
+            !trimmedLine.startsWith("•") &&
+            !trimmedLine.startsWith("-") &&
+            !trimmedLine.match(/^[●·◦]/) &&
+            !trimmedLine.match(
+              /^(Technologies|Tech Stack|Tools|Skills|Duration):?/i
+            ) &&
+            !trimmedLine.match(/^\d{4}/) && // Doesn't start with year
+            (trimmedLine === trimmedLine.toUpperCase() || // All caps title
+              /^[A-Z][a-zA-Z\s&]+$/.test(trimmedLine) || // Title case
+              trimmedLine.match(
+                /[A-Za-z\s]+(?:App|Application|System|Platform|Website|Tool|Dashboard|API)$/i
+              ) || // Common project suffixes
+              trimmedLine.match(/\b(Project|App|System|Platform)\b/i))) || // Contains project keywords
+          // Specific project names you mentioned
+          trimmedLine.match(
+            /(Lexicon|File Sharing App|Word Lookup Dictionary|Alternative-Routes|Clustering SSH Attacks)/i
+          )
         ) {
-          if (currentProject) {
+          if (currentProject && currentProject.name) {
             projects.push(currentProject);
           }
 
           currentProject = {
-            name: line.replace(/🔴$/, "").trim(),
+            name: trimmedLine,
             description: [],
+            techStack: "",
           };
+          inProjectSection = true;
         }
         // Project descriptions
         else if (
           currentProject &&
-          (line.startsWith("•") ||
-            line.startsWith("-") ||
-            line.match(/^[●·◦]/) ||
-            line.length > 10)
+          inProjectSection &&
+          (trimmedLine.startsWith("•") ||
+            trimmedLine.startsWith("-") ||
+            trimmedLine.match(/^[●·◦]/) ||
+            trimmedLine.length > 10)
         ) {
-          const cleanDesc = line.replace(/^[•\-●·◦]\s*/, "").trim();
-          if (cleanDesc) {
+          const cleanDesc = trimmedLine.replace(/^[•\-●·◦]\s*/, "").trim();
+          if (
+            cleanDesc &&
+            !cleanDesc.match(/^(Technologies|Tech Stack|Tools):?/i)
+          ) {
             currentProject.description.push(cleanDesc);
           }
         }
-        // Tech stack might be mentioned
-        else if (currentProject && line.match(/Tech Stack:/i)) {
-          currentProject.description.push(line);
+        // Tech stack detection
+        else if (
+          currentProject &&
+          trimmedLine.match(/Tech Stack:|Technologies:|Tools:/i)
+        ) {
+          currentProject.techStack = trimmedLine
+            .replace(/(Tech Stack|Technologies|Tools):/i, "")
+            .trim();
+          inProjectSection = true;
+        }
+        // Handle tech stack that might be in the description
+        else if (
+          currentProject &&
+          inProjectSection &&
+          trimmedLine.match(
+            /React|Node|JavaScript|TypeScript|Python|Java|MongoDB|MySQL|PostgreSQL|Express|Vue|Angular|Django|Flask|Spring/i
+          )
+        ) {
+          if (!currentProject.techStack) {
+            currentProject.techStack = trimmedLine.trim();
+          } else {
+            // Append to existing tech stack
+            currentProject.techStack += `, ${trimmedLine.trim()}`;
+          }
+        }
+        // End of project section detection
+        else if (
+          currentProject &&
+          inProjectSection &&
+          trimmedLine.match(
+            /^(EDUCATION|EXPERIENCE|SKILLS|CERTIFICATIONS|AWARDS|CONTACT)/i
+          )
+        ) {
+          projects.push(currentProject);
+          currentProject = null;
+          inProjectSection = false;
+          break; // Stop processing if we hit another major section
         }
       }
 
-      if (currentProject) {
+      // Don't forget the last project
+      if (currentProject && currentProject.name) {
         projects.push(currentProject);
       }
     }
@@ -381,11 +468,11 @@ export default function JobApplicationPlatform() {
         phone,
         links,
       },
-      skills: Array.from(skills).slice(0, 20), // Increased limit for better coverage
+      skills: Array.from(skills).slice(0, 20),
       experience,
       education,
       projects,
-      rawText: text, // Keep original text for debugging
+      summary: data?.summary || "", // Preserve existing summary if editing
     };
   };
 
@@ -402,15 +489,141 @@ export default function JobApplicationPlatform() {
 
     try {
       const text = await extractTextFromPDF(f);
-      console.log("Extracted text:", text); // For debugging
       const parsed = parseResume(text);
-      console.log("Parsed data:", parsed); // For debugging
-      setData({ ...parsed, fileName: f.name });
+      setData(parsed);
     } catch (err) {
       console.error("Upload error:", err);
       setError("Failed to parse PDF. Please try another file.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const startEditing = (section, index = null) => {
+    setEditing({ section, index });
+
+    if (section === "info") {
+      setEditData({ ...data.info });
+    } else if (section === "summary") {
+      setEditData(data.summary || "");
+    } else if (index !== null) {
+      setEditData({ ...data[section][index] });
+    } else {
+      // Adding new item
+      if (section === "skills") {
+        setEditData("");
+      } else if (section === "projects") {
+        // FIXED: Ensure projects have description array
+        setEditData({
+          name: "",
+          description: [""], // Initialize with one empty description
+          techStack: "",
+        });
+      } else {
+        setEditData({
+          title: "",
+          company: "",
+          period: "",
+          desc: [""],
+          ...(section === "education" && {
+            degree: "",
+            school: "",
+            year: "",
+            location: "",
+          }),
+        });
+      }
+    }
+  };
+
+  const saveEditing = () => {
+    if (!editing || !editData) return;
+
+    const newData = { ...data };
+
+    // Ensure projects array exists
+    if (!newData.projects) {
+      newData.projects = [];
+    }
+
+    if (editing.section === "info") {
+      newData.info = { ...editData };
+    } else if (editing.section === "summary") {
+      newData.summary = editData;
+    } else if (editing.index !== null) {
+      // Editing existing item
+      newData[editing.section][editing.index] = { ...editData };
+    } else {
+      // Adding new item
+      if (editing.section === "skills") {
+        newData.skills.push(editData);
+      } else if (editing.section === "projects") {
+        // FIXED: Ensure project has proper structure
+        const newProject = {
+          name: editData.name || "",
+          description: editData.description || [""],
+          techStack: editData.techStack || "",
+        };
+        newData.projects.push(newProject);
+      } else {
+        newData[editing.section].push(editData);
+      }
+    }
+
+    setData(newData);
+    setEditing(null);
+    setEditData(null);
+  };
+
+  const cancelEditing = () => {
+    setEditing(null);
+    setEditData(null);
+  };
+
+  const deleteItem = (section, index) => {
+    const newData = { ...data };
+    newData[section].splice(index, 1);
+    setData(newData);
+  };
+
+  const updateEditData = (field, value, descIndex = null) => {
+    if (descIndex !== null) {
+      // Handle experience descriptions
+      if (editData.desc) {
+        const newDesc = [...editData.desc];
+        newDesc[descIndex] = value;
+        setEditData({ ...editData, desc: newDesc });
+      }
+      // Handle project descriptions - FIXED
+      else if (editData.description && Array.isArray(editData.description)) {
+        const newDesc = [...editData.description];
+        newDesc[descIndex] = value;
+        setEditData({ ...editData, description: newDesc });
+      }
+    } else {
+      setEditData({ ...editData, [field]: value });
+    }
+  };
+
+  const addDescriptionField = () => {
+    if (editData.desc) {
+      // For experience
+      setEditData({ ...editData, desc: [...editData.desc, ""] });
+    } else if (editData.description) {
+      // For projects - FIXED
+      setEditData({ ...editData, description: [...editData.description, ""] });
+    }
+  };
+
+  const removeDescriptionField = (index) => {
+    if (editData.desc) {
+      // For experience
+      const newDesc = editData.desc.filter((_, i) => i !== index);
+      setEditData({ ...editData, desc: newDesc });
+    } else if (editData.description) {
+      // For projects - FIXED
+      const newDesc = editData.description.filter((_, i) => i !== index);
+      setEditData({ ...editData, description: newDesc });
     }
   };
 
@@ -423,9 +636,359 @@ export default function JobApplicationPlatform() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${data.fileName.replace(".pdf", "")}_parsed.json`;
+    a.download = `resume_data_${new Date().getTime()}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const clearData = () => {
+    localStorage.removeItem("resumeData");
+    localStorage.removeItem("applicationFormData");
+    setData(null);
+    setFormData({ fullName: "", email: "" });
+    setFile(null);
+  };
+
+  // Edit Form Components
+  const renderEditForm = () => {
+    if (!editing) return null;
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-bold text-black">
+              {editing.index === null ? "Add New" : "Edit"}{" "}
+              {editing.section.charAt(0).toUpperCase() +
+                editing.section.slice(1)}
+            </h3>
+            <button
+              onClick={cancelEditing}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            {editing.section === "info" && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-black mb-1">
+                    Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editData.name || ""}
+                    onChange={(e) => updateEditData("name", e.target.value)}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-black"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-black mb-1">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    value={editData.email || ""}
+                    onChange={(e) => updateEditData("email", e.target.value)}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-black"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-black mb-1">
+                    Phone
+                  </label>
+                  <input
+                    type="text"
+                    value={editData.phone || ""}
+                    onChange={(e) => updateEditData("phone", e.target.value)}
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-black"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-black mb-1">
+                    LinkedIn
+                  </label>
+                  <input
+                    type="text"
+                    value={editData.links?.linkedin || ""}
+                    onChange={(e) =>
+                      updateEditData("links", {
+                        ...editData.links,
+                        linkedin: e.target.value,
+                      })
+                    }
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-black"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-black mb-1">
+                    GitHub
+                  </label>
+                  <input
+                    type="text"
+                    value={editData.links?.github || ""}
+                    onChange={(e) =>
+                      updateEditData("links", {
+                        ...editData.links,
+                        github: e.target.value,
+                      })
+                    }
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-black"
+                  />
+                </div>
+              </>
+            )}
+
+            {editing.section === "summary" && (
+              <div>
+                <label className="block text-sm font-medium text-black mb-1">
+                  Professional Summary
+                </label>
+                <textarea
+                  value={editData}
+                  onChange={(e) => setEditData(e.target.value)}
+                  rows={6}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-black"
+                />
+              </div>
+            )}
+
+            {editing.section === "skills" && (
+              <div>
+                <label className="block text-sm font-medium text-black mb-1">
+                  Skill
+                </label>
+                <input
+                  type="text"
+                  value={editData}
+                  onChange={(e) => setEditData(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-black"
+                  placeholder="Enter a skill"
+                />
+              </div>
+            )}
+
+            {(editing.section === "experience" ||
+              editing.section === "projects" ||
+              editing.section === "education") && (
+              <>
+                {editing.section === "experience" && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-black mb-1">
+                        Job Title
+                      </label>
+                      <input
+                        type="text"
+                        value={editData.title || ""}
+                        onChange={(e) =>
+                          updateEditData("title", e.target.value)
+                        }
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-black"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-black mb-1">
+                        Company
+                      </label>
+                      <input
+                        type="text"
+                        value={editData.company || ""}
+                        onChange={(e) =>
+                          updateEditData("company", e.target.value)
+                        }
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-black"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-black mb-1">
+                        Period
+                      </label>
+                      <input
+                        type="text"
+                        value={editData.period || ""}
+                        onChange={(e) =>
+                          updateEditData("period", e.target.value)
+                        }
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-black"
+                        placeholder="e.g., 01/2020 - Present"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-black mb-1">
+                        Description
+                      </label>
+                      {editData.desc?.map((desc, index) => (
+                        <div key={index} className="flex gap-2 mb-2">
+                          <input
+                            type="text"
+                            value={desc}
+                            onChange={(e) =>
+                              updateEditData("desc", e.target.value, index)
+                            }
+                            className="flex-1 border border-gray-300 rounded px-3 py-2 text-black"
+                            placeholder="Description point"
+                          />
+                          <button
+                            onClick={() => removeDescriptionField(index)}
+                            className="px-3 py-2 text-red-600 hover:bg-red-50 rounded"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        onClick={addDescriptionField}
+                        className="flex items-center gap-2 text-blue-600 hover:text-blue-800 text-sm"
+                      >
+                        <Plus className="w-4 h-4" /> Add Description Point
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {editing.section === "projects" && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-black mb-1">
+                        Project Name
+                      </label>
+                      <input
+                        type="text"
+                        value={editData.name || ""}
+                        onChange={(e) => updateEditData("name", e.target.value)}
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-black"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-black mb-1">
+                        Tech Stack
+                      </label>
+                      <input
+                        type="text"
+                        value={editData.techStack || ""}
+                        onChange={(e) =>
+                          updateEditData("techStack", e.target.value)
+                        }
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-black"
+                        placeholder="e.g., React, Node.js, MongoDB"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-black mb-1">
+                        Description
+                      </label>
+                      {editData.description?.map((desc, index) => (
+                        <div key={index} className="flex gap-2 mb-2">
+                          <input
+                            type="text"
+                            value={desc}
+                            onChange={(e) =>
+                              updateEditData(
+                                "description",
+                                e.target.value,
+                                index
+                              )
+                            }
+                            className="flex-1 border border-gray-300 rounded px-3 py-2 text-black"
+                            placeholder="Project description point"
+                          />
+                          <button
+                            onClick={() => removeDescriptionField(index)}
+                            className="px-3 py-2 text-red-600 hover:bg-red-50 rounded"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        onClick={addDescriptionField}
+                        className="flex items-center gap-2 text-blue-600 hover:text-blue-800 text-sm"
+                      >
+                        <Plus className="w-4 h-4" /> Add Description Point
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {editing.section === "education" && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-black mb-1">
+                        Degree
+                      </label>
+                      <input
+                        type="text"
+                        value={editData.degree || ""}
+                        onChange={(e) =>
+                          updateEditData("degree", e.target.value)
+                        }
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-black"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-black mb-1">
+                        School/University
+                      </label>
+                      <input
+                        type="text"
+                        value={editData.school || ""}
+                        onChange={(e) =>
+                          updateEditData("school", e.target.value)
+                        }
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-black"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-black mb-1">
+                        Year
+                      </label>
+                      <input
+                        type="text"
+                        value={editData.year || ""}
+                        onChange={(e) => updateEditData("year", e.target.value)}
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-black"
+                        placeholder="e.g., 2020 or 2018-2022"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-black mb-1">
+                        Location
+                      </label>
+                      <input
+                        type="text"
+                        value={editData.location || ""}
+                        onChange={(e) =>
+                          updateEditData("location", e.target.value)
+                        }
+                        className="w-full border border-gray-300 rounded px-3 py-2 text-black"
+                      />
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+
+          <div className="flex gap-3 mt-6">
+            <button
+              onClick={saveEditing}
+              className="flex items-center gap-2 bg-blue-800 text-white px-4 py-2 rounded hover:bg-blue-900"
+            >
+              <Save className="w-4 h-4" /> Save
+            </button>
+            <button
+              onClick={cancelEditing}
+              className="flex items-center gap-2 border border-gray-300 text-black px-4 py-2 rounded hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   // Job Listing Page
@@ -699,7 +1262,8 @@ export default function JobApplicationPlatform() {
                   <CheckCircle className="w-4 h-4 text-green-600" />
                   <span className="text-green-700">
                     Resume parsed successfully! Found: {data.skills.length}{" "}
-                    skills, {data.experience.length} experiences
+                    skills, {data.experience.length} experiences,{" "}
+                    {data.projects.length} projects
                   </span>
                 </div>
               )}
@@ -726,141 +1290,200 @@ export default function JobApplicationPlatform() {
   if (page === "profile" && data) {
     return (
       <div className="min-h-screen bg-gray-50">
+        {renderEditForm()}
         <div className="max-w-5xl mx-auto p-8">
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 mb-6">
             {/* Basic Info */}
-            <div className="flex items-start gap-6 mb-8">
-              <div className="w-24 h-24 bg-gray-200 rounded-full flex items-center justify-center border-2 border-gray-300">
-                <svg
-                  className="w-12 h-12 text-gray-400"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                  />
-                </svg>
-              </div>
-              <div className="flex-1">
-                <h2 className="text-2xl font-bold mb-2 text-black">
-                  {formData.fullName || data.info.name || "Candidate"}
-                </h2>
-                <div className="flex flex-wrap gap-4 text-sm text-gray-600 mb-2">
-                  {data.info.email && (
-                    <span className="flex items-center gap-1">
-                      <span className="font-medium">Email:</span>{" "}
-                      {data.info.email}
-                    </span>
-                  )}
-                  {data.info.phone && (
-                    <span className="flex items-center gap-1">
-                      <span className="font-medium">Phone:</span>{" "}
-                      {data.info.phone}
-                    </span>
-                  )}
+            <div className="flex items-start justify-between mb-8">
+              <div className="flex items-start gap-6 flex-1">
+                <div className="w-24 h-24 bg-gray-200 rounded-full flex items-center justify-center border-2 border-gray-300">
+                  <svg
+                    className="w-12 h-12 text-gray-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                    />
+                  </svg>
                 </div>
-                <div className="flex flex-wrap gap-4 text-sm">
-                  {data.info.links.linkedin && (
-                    <a
-                      href={`https://${data.info.links.linkedin}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:text-blue-800"
+                <div className="flex-1">
+                  <div className="flex items-start justify-between">
+                    <h2 className="text-2xl font-bold mb-2 text-black">
+                      {formData.fullName || data.info.name || "Candidate"}
+                    </h2>
+                    <button
+                      onClick={() => startEditing("info")}
+                      className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm"
                     >
-                      LinkedIn
-                    </a>
-                  )}
-                  {data.info.links.github && (
-                    <a
-                      href={`https://${data.info.links.github}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:text-blue-800"
-                    >
-                      GitHub
-                    </a>
-                  )}
-                  {data.info.links.portfolio && (
-                    <a
-                      href={
-                        data.info.links.portfolio.startsWith("http")
-                          ? data.info.links.portfolio
-                          : `https://${data.info.links.portfolio}`
-                      }
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:text-blue-800"
-                    >
-                      Portfolio
-                    </a>
-                  )}
+                      <Edit className="w-4 h-4" /> Edit
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-4 text-sm text-gray-600 mb-2">
+                    {data.info.email && (
+                      <span className="flex items-center gap-1">
+                        <span className="font-medium">Email:</span>{" "}
+                        {data.info.email}
+                      </span>
+                    )}
+                    {data.info.phone && (
+                      <span className="flex items-center gap-1">
+                        <span className="font-medium">Phone:</span>{" "}
+                        {data.info.phone}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-4 text-sm">
+                    {data.info.links.linkedin && (
+                      <a
+                        href={`https://${data.info.links.linkedin}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-800"
+                      >
+                        LinkedIn
+                      </a>
+                    )}
+                    {data.info.links.github && (
+                      <a
+                        href={`https://${data.info.links.github}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-800"
+                      >
+                        GitHub
+                      </a>
+                    )}
+                    {data.info.links.portfolio && (
+                      <a
+                        href={
+                          data.info.links.portfolio.startsWith("http")
+                            ? data.info.links.portfolio
+                            : `https://${data.info.links.portfolio}`
+                        }
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-800"
+                      >
+                        Portfolio
+                      </a>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
 
             <div className="space-y-8">
-              {/* About Me Section */}
+              {/* Summary Section */}
               <div>
-                <h3 className="text-xl font-bold mb-4 text-black border-b pb-2">
-                  About Me
-                </h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xl font-bold text-black border-b pb-2">
+                    Professional Summary
+                  </h3>
+                  <button
+                    onClick={() => startEditing("summary")}
+                    className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm"
+                  >
+                    <Edit className="w-4 h-4" /> Edit
+                  </button>
+                </div>
                 <p className="text-black text-sm leading-relaxed">
-                  {data.experience.length > 0
-                    ? `Experienced ${
-                        data.experience[0]?.title || "professional"
-                      } with expertise in ${data.skills
-                        .slice(0, 5)
-                        .join(", ")}. ${
-                        data.experience[0]?.desc?.[0] ||
-                        "Skilled in developing innovative solutions and collaborating with cross-functional teams."
-                      }`
-                    : `Skilled professional with expertise in ${data.skills
-                        .slice(0, 5)
-                        .join(
-                          ", "
-                        )}. Passionate about creating efficient and scalable solutions.`}
+                  {data.summary ||
+                    (data.experience.length > 0
+                      ? `Experienced ${
+                          data.experience[0]?.title || "professional"
+                        } with expertise in ${data.skills
+                          .slice(0, 5)
+                          .join(", ")}. ${
+                          data.experience[0]?.desc?.[0] ||
+                          "Skilled in developing innovative solutions and collaborating with cross-functional teams."
+                        }`
+                      : `Skilled professional with expertise in ${data.skills
+                          .slice(0, 5)
+                          .join(
+                            ", "
+                          )}. Passionate about creating efficient and scalable solutions.`)}
                 </p>
               </div>
-
               {/* Skills Section */}
               <div>
-                <h3 className="text-xl font-bold mb-4 text-black border-b pb-2">
-                  Skills
-                </h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-bold text-black border-b pb-2">
+                    Skills
+                  </h3>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => startEditing("skills", null)}
+                      className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm"
+                    >
+                      <Plus className="w-4 h-4" /> Add Skill
+                    </button>
+                    <button
+                      onClick={() => startEditing("skills")}
+                      className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm"
+                    >
+                      <Edit className="w-4 h-4" /> Edit All
+                    </button>
+                  </div>
+                </div>
                 {data.skills.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
                     {data.skills.map((skill, i) => (
-                      <span
-                        key={i}
-                        className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium"
-                      >
-                        {skill}
-                      </span>
+                      <div key={i} className="flex items-center gap-1">
+                        <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
+                          {skill}
+                        </span>
+                        <button
+                          onClick={() => deleteItem("skills", i)}
+                          className="text-red-600 hover:text-red-800 text-xs"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-sm text-gray-500">
-                    No skills detected in resume
-                  </p>
+                  <p className="text-sm text-gray-500">No skills added yet</p>
                 )}
               </div>
-
               {/* Experience Section */}
               <div>
-                <h3 className="text-xl font-bold mb-4 text-black border-b pb-2">
-                  Experience
-                </h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-bold text-black border-b pb-2">
+                    Experience
+                  </h3>
+                  <button
+                    onClick={() => startEditing("experience", null)}
+                    className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm"
+                  >
+                    <Plus className="w-4 h-4" /> Add Experience
+                  </button>
+                </div>
                 {data.experience.length > 0 ? (
                   <div className="space-y-6">
                     {data.experience.map((exp, i) => (
                       <div
                         key={i}
-                        className="border-l-4 border-blue-500 pl-4 py-2"
+                        className="border-l-4 border-blue-500 pl-4 py-2 relative group"
                       >
+                        <div className="absolute right-0 top-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => startEditing("experience", i)}
+                            className="text-blue-600 hover:text-blue-800 p-1"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => deleteItem("experience", i)}
+                            className="text-red-600 hover:text-red-800 p-1"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                         <h4 className="font-semibold text-lg text-black mb-1">
                           {exp.title}
                         </h4>
@@ -895,23 +1518,44 @@ export default function JobApplicationPlatform() {
                   </div>
                 ) : (
                   <p className="text-sm text-gray-500">
-                    No work experience found in resume
+                    No work experience added yet
                   </p>
                 )}
               </div>
-
               {/* Education Section */}
               <div>
-                <h3 className="text-xl font-bold mb-4 text-black border-b pb-2">
-                  Education
-                </h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-bold text-black border-b pb-2">
+                    Education
+                  </h3>
+                  <button
+                    onClick={() => startEditing("education", null)}
+                    className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm"
+                  >
+                    <Plus className="w-4 h-4" /> Add Education
+                  </button>
+                </div>
                 {data.education.length > 0 ? (
                   <div className="space-y-4">
                     {data.education.map((edu, i) => (
                       <div
                         key={i}
-                        className="border-l-4 border-green-500 pl-4 py-2"
+                        className="border-l-4 border-green-500 pl-4 py-2 relative group"
                       >
+                        <div className="absolute right-0 top-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => startEditing("education", i)}
+                            className="text-blue-600 hover:text-blue-800 p-1"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => deleteItem("education", i)}
+                            className="text-red-600 hover:text-red-800 p-1"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                         <h4 className="font-semibold text-black mb-1">
                           {edu.degree}
                         </h4>
@@ -930,44 +1574,96 @@ export default function JobApplicationPlatform() {
                   </div>
                 ) : (
                   <p className="text-sm text-gray-500">
-                    No education information found in resume
+                    No education information added yet
                   </p>
                 )}
               </div>
-
               {/* Projects Section */}
-              {data.projects && data.projects.length > 0 && (
-                <div>
-                  <h3 className="text-xl font-bold mb-4 text-black border-b pb-2">
-                    Projects
+
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-bold text-black border-b pb-2">
+                    Projects{" "}
+                    {data.projects &&
+                      data.projects.length > 0 &&
+                      `(${data.projects.length})`}
                   </h3>
+                  <button
+                    onClick={() => startEditing("projects", null)}
+                    className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm"
+                  >
+                    <Plus className="w-4 h-4" /> Add Project
+                  </button>
+                </div>
+
+                {/* Show message if no projects found */}
+                {(!data.projects || data.projects.length === 0) && (
+                  <div className="text-center py-8 border-2 border-dashed border-gray-300 rounded-lg">
+                    <p className="text-gray-500 mb-4">
+                      No projects found in your resume
+                    </p>
+                    <button
+                      onClick={() => startEditing("projects", null)}
+                      className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 mx-auto"
+                    >
+                      <Plus className="w-4 h-4" /> Add Your First Project
+                    </button>
+                  </div>
+                )}
+
+                {/* Show projects if they exist */}
+                {data.projects && data.projects.length > 0 ? (
                   <div className="space-y-4">
                     {data.projects.map((project, i) => (
                       <div
                         key={i}
-                        className="border-l-4 border-purple-500 pl-4 py-2"
+                        className="border-l-4 border-purple-500 pl-4 py-2 relative group"
                       >
+                        <div className="absolute right-0 top-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => startEditing("projects", i)}
+                            className="text-blue-600 hover:text-blue-800 p-1"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => deleteItem("projects", i)}
+                            className="text-red-600 hover:text-red-800 p-1"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                         <h4 className="font-semibold text-black mb-2">
                           {project.name}
                         </h4>
-                        {project.description.length > 0 && (
-                          <ul className="space-y-1">
-                            {project.description.map((desc, descIndex) => (
-                              <li
-                                key={descIndex}
-                                className="text-sm text-black flex"
-                              >
-                                <span className="mr-2 text-purple-500">•</span>
-                                <span className="leading-relaxed">{desc}</span>
-                              </li>
-                            ))}
-                          </ul>
+                        {project.techStack && (
+                          <p className="text-sm text-gray-600 mb-2">
+                            <strong>Tech Stack:</strong> {project.techStack}
+                          </p>
                         )}
+                        {project.description &&
+                          project.description.length > 0 && (
+                            <ul className="space-y-1">
+                              {project.description.map((desc, descIndex) => (
+                                <li
+                                  key={descIndex}
+                                  className="text-sm text-black flex"
+                                >
+                                  <span className="mr-2 text-purple-500">
+                                    •
+                                  </span>
+                                  <span className="leading-relaxed">
+                                    {desc}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
                       </div>
                     ))}
                   </div>
-                </div>
-              )}
+                ) : null}
+              </div>
             </div>
           </div>
 
@@ -983,7 +1679,7 @@ export default function JobApplicationPlatform() {
             </div>
           </div>
 
-          <div className="mt-6 flex gap-4">
+          <div className="mt-6 flex gap-4 flex-wrap">
             <button
               onClick={() => setPage("apply")}
               className="flex items-center gap-2 border-2 border-gray-300 px-6 py-2 rounded hover:bg-gray-50 text-black transition-colors"
@@ -994,7 +1690,13 @@ export default function JobApplicationPlatform() {
               onClick={downloadJSON}
               className="flex items-center gap-2 bg-blue-800 text-white px-6 py-2 rounded hover:bg-blue-900 transition-colors"
             >
-              <Download className="w-4 h-4" /> Download Parsed Data
+              <Download className="w-4 h-4" /> Download Data
+            </button>
+            <button
+              onClick={clearData}
+              className="flex items-center gap-2 border-2 border-red-300 text-red-600 px-6 py-2 rounded hover:bg-red-50 transition-colors"
+            >
+              <Trash2 className="w-4 h-4" /> Clear All Data
             </button>
             <button
               onClick={() => setPage("job")}
