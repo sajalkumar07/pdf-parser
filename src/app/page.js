@@ -39,17 +39,23 @@ export default function JobApplicationPlatform() {
   }, []);
 
   const extractTextFromPDF = async (file) => {
-    const buffer = await file.arrayBuffer();
-    const pdf = await window["pdfjs-dist/build/pdf"].getDocument({
-      data: buffer,
-    }).promise;
-    let text = "";
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      text += content.items.map((item) => item.str).join(" ") + "\n";
+    try {
+      const buffer = await file.arrayBuffer();
+      const pdf = await window["pdfjs-dist/build/pdf"].getDocument({
+        data: buffer,
+      }).promise;
+
+      let text = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        text += content.items.map((item) => item.str).join(" ") + "\n";
+      }
+      return text.trim();
+    } catch (err) {
+      console.error("PDF extraction error:", err);
+      throw new Error("Failed to extract text from PDF");
     }
-    return text.trim();
   };
 
   const parseResume = (text) => {
@@ -58,93 +64,120 @@ export default function JobApplicationPlatform() {
       .map((l) => l.trim())
       .filter((l) => l);
 
-    // Extract basic info (name, email, phone, links)
+    // Extract basic info with improved patterns
     const email = text.match(/[\w\.-]+@[\w\.-]+\.\w+/)?.[0] || "";
-    const phone =
-      text.match(
-        /(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/
-      )?.[0] || "";
 
-    // Extract name - usually the first line that's in all caps and reasonable length
+    // Improved phone number matching
+    const phoneMatch = text.match(
+      /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/
+    );
+    const phone = phoneMatch ? phoneMatch[0] : "";
+
+    // Extract name - improved pattern matching
     let name = "";
     for (const line of lines) {
       if (
         line.length > 2 &&
         line.length < 50 &&
-        line === line.toUpperCase() &&
-        /^[A-Z\s]+$/.test(line)
+        (line === line.toUpperCase() ||
+          /^[A-Z][a-z]+(\s+[A-Z][a-z]+)+$/.test(line)) &&
+        !line.includes("@") &&
+        !line.includes("github") &&
+        !line.includes("linkedin")
       ) {
         name = line;
         break;
       }
     }
 
-    // Extract links
+    // If no name found with uppercase pattern, try first non-empty line
+    if (!name && lines.length > 0) {
+      name = lines[0];
+    }
+
+    // Extract links with improved patterns
     const links = {
-      linkedin: text.match(/linkedin\.com\/[^\s]+/i)?.[0] || "",
-      github: text.match(/github\.com\/[^\s]+/i)?.[0] || "",
+      linkedin:
+        text.match(
+          /(?:linkedin\.com\/[^\s]+|LinkedIn[^\n]*[:\s]*([^\s]+))/i
+        )?.[0] || "",
+      github:
+        text.match(
+          /(?:github\.com\/[^\s]+|GitHub[^\n]*[:\s]*([^\s]+))/i
+        )?.[0] || "",
       portfolio:
-        text.match(/(portfolio|website)[^\n]*[:\s]*([^\s]+)/i)?.[2] || "",
+        text.match(/(?:portfolio|website)[^\n]*[:\s]*([^\s]+)/i)?.[1] || "",
     };
 
     // Improved section extraction
-    const getSection = (headers, includeSubsections = false) => {
+    const getSection = (headers, maxLines = 50) => {
       for (const h of headers) {
-        const regex = new RegExp(
-          `${h}[\\s\\S]*?(?=\\n\\s*\\n|\\n[A-Z][A-Za-z\\s]+:|$)`,
-          "i"
-        );
-        const match = text.match(regex);
-        if (match) {
-          let content = match[0].replace(new RegExp(`^${h}`, "i"), "").trim();
+        const headerIndex = text.toLowerCase().indexOf(h.toLowerCase());
+        if (headerIndex !== -1) {
+          let sectionStart = headerIndex + h.length;
+          let sectionEnd = text.length;
 
-          if (!includeSubsections) {
-            // Remove subsection headers
-            content = content.replace(/\n[A-Z][A-Za-z\s]+:/g, "");
+          // Find the next major section
+          const nextSections = [
+            "EXPERIENCE",
+            "EDUCATION",
+            "PROJECTS",
+            "SKILLS",
+            "CERTIFICATIONS",
+            "AWARDS",
+            "CONTACT",
+            "REFERENCES",
+          ];
+
+          for (const nextSection of nextSections) {
+            if (nextSection.toLowerCase() !== h.toLowerCase()) {
+              const nextIndex = text
+                .toLowerCase()
+                .indexOf(nextSection.toLowerCase(), sectionStart);
+              if (nextIndex !== -1 && nextIndex < sectionEnd) {
+                sectionEnd = nextIndex;
+              }
+            }
           }
 
-          return content;
+          const content = text.slice(sectionStart, sectionEnd).trim();
+          return content.split("\n").slice(0, maxLines).join("\n");
         }
       }
       return "";
     };
 
-    // Parse Skills section with better handling
-    const skillSection = getSection([
-      "SKILLS",
-      "TECHNICAL SKILLS",
-      "TECHNICAL SKILLS:",
-    ]);
+    // Parse Skills section with improved handling
+    const skillSection = getSection(["SKILLS", "TECHNICAL SKILLS"]);
     const skills = new Set();
 
     if (skillSection) {
-      // Handle categorized skills (Frontend:, Backend:, etc.)
-      const categoryLines = skillSection
-        .split("\n")
-        .filter((line) => line.includes(":"));
+      // Split by lines and process each line
+      const skillLines = skillSection.split("\n").filter((line) => line.trim());
 
-      if (categoryLines.length > 0) {
-        categoryLines.forEach((line) => {
-          const [_, skillList] = line.split(":");
-          if (skillList) {
-            skillList
-              .split(/[,|]/)
-              .map((s) => s.trim())
-              .filter((s) => s && s.length > 1)
-              .forEach((skill) => skills.add(skill));
-          }
-        });
-      } else {
-        // Handle plain list of skills
-        skillSection
-          .split(/[,|•\-]/)
+      skillLines.forEach((line) => {
+        // Remove category labels and process the actual skills
+        const cleanLine = line.replace(
+          /^(Frontend|Backend|Languages|Tools|Technologies)[:\s]*/i,
+          ""
+        );
+
+        // Split by common separators
+        const lineSkills = cleanLine
+          .split(/[,|•\-·]|:\s*/)
           .map((s) => s.trim())
-          .filter((s) => s && s.length > 1 && !s.includes(":"))
-          .forEach((skill) => skills.add(skill));
-      }
+          .filter(
+            (s) =>
+              s &&
+              s.length > 1 &&
+              !s.match(/^(Frontend|Backend|Languages|Tools|Technologies)$/i)
+          );
+
+        lineSkills.forEach((skill) => skills.add(skill));
+      });
     }
 
-    // Parse Experience section with improved structure detection
+    // Parse Experience section with improved structure
     const expSection = getSection([
       "EXPERIENCE",
       "WORK EXPERIENCE",
@@ -153,76 +186,82 @@ export default function JobApplicationPlatform() {
     const experience = [];
 
     if (expSection) {
-      const expBlocks = expSection
-        .split(/\n\s*\n/)
-        .filter((block) => block.trim());
+      const lines = expSection.split("\n").filter((l) => l.trim());
+      let currentExp = null;
 
-      expBlocks.forEach((block) => {
-        const lines = block
-          .split("\n")
-          .map((l) => l.trim())
-          .filter((l) => l);
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
 
-        if (lines.length < 2) return;
+        // Look for job title pattern (often at start of line, may have company and date)
+        if (
+          line.match(
+            /[A-Z][a-z]+(\s+[A-Z][a-z]+)*\s*(?:Developer|Engineer|Specialist|Manager|Intern)/i
+          )
+        ) {
+          // If we have a previous experience, save it
+          if (currentExp && (currentExp.title || currentExp.company)) {
+            experience.push(currentExp);
+          }
 
-        // Look for job title pattern
-        let title = "";
-        let company = "";
-        let period = "";
-        let desc = [];
+          currentExp = {
+            title: "",
+            company: "",
+            period: "",
+            desc: [],
+          };
 
-        // First line typically contains title and company
-        const firstLine = lines[0];
+          // Extract period
+          const periodMatch = line.match(
+            /(\d{1,2}\/\d{4}\s*[–\-]\s*(?:present|current|\d{1,2}\/\d{4}))/i
+          );
+          if (periodMatch) {
+            currentExp.period = periodMatch[0];
+          }
 
-        // Extract period
-        const periodMatch = firstLine.match(
-          /(\d{1,2}\/\d{4}\s*[–-]\s*(present|current|\d{1,2}\/\d{4}))/i
-        );
-        if (periodMatch) {
-          period = periodMatch[0];
-        }
+          // Extract title and company
+          const cleanLine = line
+            .replace(periodMatch ? periodMatch[0] : "", "")
+            .trim();
+          const parts = cleanLine.split(/\s{2,}|\|/).filter((p) => p.trim());
 
-        // Extract title and company
-        const cleanFirstLine = firstLine
-          .replace(period, "")
-          .replace(/\|/g, "")
-          .trim();
-        const titleCompanyParts = cleanFirstLine
-          .split(/\s{2,}/)
-          .filter((p) => p);
-
-        if (titleCompanyParts.length >= 2) {
-          title = titleCompanyParts[0];
-          company = titleCompanyParts[1];
-        } else if (titleCompanyParts.length === 1) {
-          title = titleCompanyParts[0];
-        }
-
-        // Remaining lines are description/bullet points
-        for (let i = 1; i < lines.length; i++) {
-          const line = lines[i];
-          if (
-            line.startsWith("•") ||
-            line.startsWith("-") ||
-            line.match(/^[●·◦]/)
-          ) {
-            const cleanDesc = line.replace(/^[•\-●·◦]\s*/, "").trim();
-            if (cleanDesc) desc.push(cleanDesc);
-          } else if (line.length > 10 && !line.match(/^\d/)) {
-            // Handle lines without bullet points but still descriptive
-            desc.push(line);
+          if (parts.length >= 2) {
+            currentExp.title = parts[0];
+            currentExp.company = parts
+              .slice(1)
+              .join(" ")
+              .replace(/\s+/g, " ")
+              .trim();
+          } else if (parts.length === 1) {
+            currentExp.title = parts[0];
           }
         }
-
-        if (title || company) {
-          experience.push({
-            title: title || "Professional Role",
-            company: company || "",
-            period: period || "",
-            desc: desc,
-          });
+        // Look for bullet points or descriptions
+        else if (
+          currentExp &&
+          (line.startsWith("•") ||
+            line.startsWith("-") ||
+            line.match(/^[●·◦]/) ||
+            line.length > 20)
+        ) {
+          const cleanDesc = line.replace(/^[•\-●·◦]\s*/, "").trim();
+          if (cleanDesc && !cleanDesc.match(/(present|current|\d{4})/i)) {
+            currentExp.desc.push(cleanDesc);
+          }
         }
-      });
+        // Company name might be on next line
+        else if (
+          currentExp &&
+          !currentExp.company &&
+          line.match(/[A-Z][a-zA-Z\s&]+/)
+        ) {
+          currentExp.company = line.trim();
+        }
+      }
+
+      // Don't forget the last experience
+      if (currentExp && (currentExp.title || currentExp.company)) {
+        experience.push(currentExp);
+      }
     }
 
     // Parse Education section
@@ -230,87 +269,109 @@ export default function JobApplicationPlatform() {
     const education = [];
 
     if (eduSection) {
-      const eduBlocks = eduSection
-        .split(/\n\s*\n/)
-        .filter((block) => block.trim());
+      const lines = eduSection.split("\n").filter((l) => l.trim());
+      let currentEdu = null;
 
-      eduBlocks.forEach((block) => {
-        const lines = block
-          .split("\n")
-          .map((l) => l.trim())
-          .filter((l) => l);
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
 
-        if (lines.length === 0) return;
+        // Look for degree patterns
+        if (
+          line.match(
+            /(B\.Tech|B\.E|B\.S|M\.Tech|M\.S|Bachelor|Master|Diploma)/i
+          )
+        ) {
+          if (currentEdu) {
+            education.push(currentEdu);
+          }
 
-        let degree = "";
-        let school = "";
-        let year = "";
-        let location = "";
-
-        // First line typically contains degree
-        degree = lines[0];
-
+          currentEdu = {
+            degree: line.trim(),
+            school: "",
+            year: "",
+            location: "",
+          };
+        }
+        // Look for school names
+        else if (
+          currentEdu &&
+          !currentEdu.school &&
+          line.match(/(University|College|Institute|School|Academy)/i)
+        ) {
+          currentEdu.school = line.trim();
+        }
         // Look for year
-        const yearMatch = block.match(/\b(19|20)\d{2}\b/);
-        if (yearMatch) year = yearMatch[0];
-
-        // Second line often contains school and location
-        if (lines.length > 1) {
-          const schoolLine = lines[1];
-          // Simple heuristic: if it contains common location indicators
-          if (schoolLine.match(/\b(University|College|Institute|School)\b/i)) {
-            school = schoolLine;
+        else if (currentEdu && !currentEdu.year) {
+          const yearMatch = line.match(/(19|20)\d{2}/);
+          if (yearMatch) {
+            currentEdu.year = yearMatch[0];
           }
         }
-
-        // Look for location in subsequent lines
-        for (let i = 2; i < lines.length; i++) {
-          if (lines[i].match(/[A-Z][a-z]+/)) {
-            location = lines[i];
-            break;
-          }
+        // Look for location (usually shorter text)
+        else if (
+          currentEdu &&
+          !currentEdu.location &&
+          line.length < 30 &&
+          line.match(/[A-Z][a-z]+/)
+        ) {
+          currentEdu.location = line.trim();
         }
+      }
 
-        if (degree || school) {
-          education.push({
-            degree: degree || "",
-            school: school || "",
-            year: year || "",
-            location: location || "",
-          });
-        }
-      });
+      if (currentEdu) {
+        education.push(currentEdu);
+      }
     }
 
-    // Parse Projects section if present
+    // Parse Projects section
     const projectsSection = getSection(["PROJECTS", "PERSONAL PROJECTS"]);
     const projects = [];
 
     if (projectsSection) {
-      const projectBlocks = projectsSection
-        .split(/\n\s*\n/)
-        .filter((block) => block.trim());
+      const lines = projectsSection.split("\n").filter((l) => l.trim());
+      let currentProject = null;
 
-      projectBlocks.forEach((block) => {
-        const lines = block
-          .split("\n")
-          .map((l) => l.trim())
-          .filter((l) => l);
-        if (lines.length < 2) return;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
 
-        const project = {
-          name: lines[0].replace(/[•\-●·◦]\s*/, "").trim(),
-          description: [],
-        };
+        // Project names often start the line, might have icons or bold formatting indicators
+        if (
+          line.match(/[A-Z][A-Za-z\s]+(?:\s*🔴)?$/) &&
+          line.length < 100 &&
+          !line.startsWith("•") &&
+          !line.startsWith("-")
+        ) {
+          if (currentProject) {
+            projects.push(currentProject);
+          }
 
-        for (let i = 1; i < lines.length; i++) {
-          if (lines[i].startsWith("•") || lines[i].startsWith("-")) {
-            project.description.push(lines[i].replace(/^[•\-]\s*/, "").trim());
+          currentProject = {
+            name: line.replace(/🔴$/, "").trim(),
+            description: [],
+          };
+        }
+        // Project descriptions
+        else if (
+          currentProject &&
+          (line.startsWith("•") ||
+            line.startsWith("-") ||
+            line.match(/^[●·◦]/) ||
+            line.length > 10)
+        ) {
+          const cleanDesc = line.replace(/^[•\-●·◦]\s*/, "").trim();
+          if (cleanDesc) {
+            currentProject.description.push(cleanDesc);
           }
         }
+        // Tech stack might be mentioned
+        else if (currentProject && line.match(/Tech Stack:/i)) {
+          currentProject.description.push(line);
+        }
+      }
 
-        projects.push(project);
-      });
+      if (currentProject) {
+        projects.push(currentProject);
+      }
     }
 
     return {
@@ -320,18 +381,20 @@ export default function JobApplicationPlatform() {
         phone,
         links,
       },
-      skills: Array.from(skills).slice(0, 15),
+      skills: Array.from(skills).slice(0, 20), // Increased limit for better coverage
       experience,
       education,
       projects,
+      rawText: text, // Keep original text for debugging
     };
   };
 
   const handleUpload = async (e) => {
     const f = e.target.files[0];
     if (!f) return;
-    if (f.type !== "application/pdf") return setError("PDF only");
-    if (!ready) return setError("Loading...");
+    if (f.type !== "application/pdf")
+      return setError("Please upload a PDF file only");
+    if (!ready) return setError("PDF parser is still loading...");
 
     setFile(f);
     setError(null);
@@ -339,23 +402,28 @@ export default function JobApplicationPlatform() {
 
     try {
       const text = await extractTextFromPDF(f);
+      console.log("Extracted text:", text); // For debugging
       const parsed = parseResume(text);
-      setData({ ...parsed, raw: text, fileName: f.name });
+      console.log("Parsed data:", parsed); // For debugging
+      setData({ ...parsed, fileName: f.name });
     } catch (err) {
-      setError("Failed to parse PDF");
+      console.error("Upload error:", err);
+      setError("Failed to parse PDF. Please try another file.");
     } finally {
       setLoading(false);
     }
   };
 
   const downloadJSON = () => {
+    if (!data) return;
+
     const blob = new Blob([JSON.stringify(data, null, 2)], {
       type: "application/json",
     });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${data.fileName.replace(".pdf", "")}.json`;
+    a.download = `${data.fileName.replace(".pdf", "")}_parsed.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -485,9 +553,9 @@ export default function JobApplicationPlatform() {
           <div className="col-span-2">
             <button
               onClick={() => setPage("job")}
-              className="bg-blue-800 text-white px-6 py-2 rounded mb-6 font-bold hover:bg-blue-900"
+              className="flex items-center gap-2 bg-blue-800 text-white px-6 py-2 rounded mb-6 font-bold hover:bg-blue-900"
             >
-              Back
+              <ArrowLeft className="w-4 h-4" /> Back to Job
             </button>
 
             <div className="bg-white rounded-lg shadow p-8">
@@ -559,6 +627,7 @@ export default function JobApplicationPlatform() {
                     setFormData({ ...formData, fullName: e.target.value })
                   }
                   className="w-full border border-gray-300 rounded px-4 py-2 text-black"
+                  placeholder="Enter your full name"
                 />
               </div>
 
@@ -573,19 +642,31 @@ export default function JobApplicationPlatform() {
                     setFormData({ ...formData, email: e.target.value })
                   }
                   className="w-full border border-gray-300 rounded px-4 py-2 text-black"
+                  placeholder="Enter your email"
                 />
               </div>
 
               <div>
                 <label className="block font-bold mb-2 text-black">
-                  Resume
+                  Resume (PDF only)
                 </label>
                 <label
-                  className={`block border border-gray-300 rounded px-4 py-2 text-center text-black ${
-                    ready ? "cursor-pointer hover:bg-gray-50" : "opacity-50"
-                  }`}
+                  className={`block border-2 border-dashed border-gray-300 rounded-lg px-4 py-6 text-center cursor-pointer transition-colors ${
+                    ready
+                      ? "hover:border-blue-500 hover:bg-blue-50"
+                      : "opacity-50 cursor-not-allowed"
+                  } ${file ? "border-green-500 bg-green-50" : ""}`}
                 >
-                  {file ? file.name : "Click to upload a resume"}
+                  <Upload className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+                  <div className="text-sm text-gray-600">
+                    {file ? (
+                      <span className="text-green-600 font-medium">
+                        {file.name}
+                      </span>
+                    ) : (
+                      "Click to upload your resume (PDF)"
+                    )}
+                  </div>
                   <input
                     type="file"
                     accept=".pdf"
@@ -594,6 +675,9 @@ export default function JobApplicationPlatform() {
                     disabled={!ready}
                   />
                 </label>
+                <p className="text-xs text-gray-500 mt-1">
+                  Upload your resume in PDF format for automatic parsing
+                </p>
               </div>
 
               {error && (
@@ -605,7 +689,7 @@ export default function JobApplicationPlatform() {
 
               {loading && (
                 <div className="text-center py-4">
-                  <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
+                  <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-blue-600" />
                   <p className="text-sm text-black">Parsing resume...</p>
                 </div>
               )}
@@ -614,7 +698,8 @@ export default function JobApplicationPlatform() {
                 <div className="p-3 bg-green-50 border border-green-200 rounded flex items-center gap-2 text-sm">
                   <CheckCircle className="w-4 h-4 text-green-600" />
                   <span className="text-green-700">
-                    Resume uploaded successfully
+                    Resume parsed successfully! Found: {data.skills.length}{" "}
+                    skills, {data.experience.length} experiences
                   </span>
                 </div>
               )}
@@ -622,13 +707,13 @@ export default function JobApplicationPlatform() {
               <button
                 onClick={() => data && setPage("profile")}
                 disabled={!data || !formData.fullName || !formData.email}
-                className={`w-full py-3 rounded font-bold ${
+                className={`w-full py-3 rounded font-bold transition-colors ${
                   data && formData.fullName && formData.email
                     ? "bg-blue-800 text-white hover:bg-blue-900"
-                    : "bg-gray-300 text-black cursor-not-allowed"
+                    : "bg-gray-300 text-gray-500 cursor-not-allowed"
                 }`}
               >
-                Submit Application
+                {data ? "Review Application" : "Upload Resume to Continue"}
               </button>
             </div>
           </div>
@@ -645,9 +730,9 @@ export default function JobApplicationPlatform() {
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 mb-6">
             {/* Basic Info */}
             <div className="flex items-start gap-6 mb-8">
-              <div className="w-24 h-24 border-2 border-black rounded-full flex items-center justify-center">
+              <div className="w-24 h-24 bg-gray-200 rounded-full flex items-center justify-center border-2 border-gray-300">
                 <svg
-                  className="w-12 h-12"
+                  className="w-12 h-12 text-gray-400"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -664,19 +749,54 @@ export default function JobApplicationPlatform() {
                 <h2 className="text-2xl font-bold mb-2 text-black">
                   {formData.fullName || data.info.name || "Candidate"}
                 </h2>
-                <div className="flex flex-wrap gap-4 text-sm text-black mb-2">
-                  {data.info.email && <span>{data.info.email}</span>}
-                  {data.info.phone && <span>{data.info.phone}</span>}
+                <div className="flex flex-wrap gap-4 text-sm text-gray-600 mb-2">
+                  {data.info.email && (
+                    <span className="flex items-center gap-1">
+                      <span className="font-medium">Email:</span>{" "}
+                      {data.info.email}
+                    </span>
+                  )}
+                  {data.info.phone && (
+                    <span className="flex items-center gap-1">
+                      <span className="font-medium">Phone:</span>{" "}
+                      {data.info.phone}
+                    </span>
+                  )}
                 </div>
-                <div className="flex flex-wrap gap-4 text-sm text-blue-600">
+                <div className="flex flex-wrap gap-4 text-sm">
                   {data.info.links.linkedin && (
-                    <span>LinkedIn: {data.info.links.linkedin}</span>
+                    <a
+                      href={`https://${data.info.links.linkedin}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-800"
+                    >
+                      LinkedIn
+                    </a>
                   )}
                   {data.info.links.github && (
-                    <span>GitHub: {data.info.links.github}</span>
+                    <a
+                      href={`https://${data.info.links.github}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-800"
+                    >
+                      GitHub
+                    </a>
                   )}
                   {data.info.links.portfolio && (
-                    <span>Portfolio: {data.info.links.portfolio}</span>
+                    <a
+                      href={
+                        data.info.links.portfolio.startsWith("http")
+                          ? data.info.links.portfolio
+                          : `https://${data.info.links.portfolio}`
+                      }
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-800"
+                    >
+                      Portfolio
+                    </a>
                   )}
                 </div>
               </div>
@@ -685,47 +805,53 @@ export default function JobApplicationPlatform() {
             <div className="space-y-8">
               {/* About Me Section */}
               <div>
-                <h3 className="text-lg font-bold mb-3 text-black">About Me</h3>
-                <p className="text-black text-sm">
+                <h3 className="text-xl font-bold mb-4 text-black border-b pb-2">
+                  About Me
+                </h3>
+                <p className="text-black text-sm leading-relaxed">
                   {data.experience.length > 0
                     ? `Experienced ${
                         data.experience[0]?.title || "professional"
                       } with expertise in ${data.skills
-                        .slice(0, 3)
-                        .join(", ")}.`
-                    : "Write a short professional bio (e.g., skills, experience, interests)"}
+                        .slice(0, 5)
+                        .join(", ")}. ${
+                        data.experience[0]?.desc?.[0] ||
+                        "Skilled in developing innovative solutions and collaborating with cross-functional teams."
+                      }`
+                    : `Skilled professional with expertise in ${data.skills
+                        .slice(0, 5)
+                        .join(
+                          ", "
+                        )}. Passionate about creating efficient and scalable solutions.`}
                 </p>
               </div>
 
               {/* Skills Section */}
               <div>
-                <h3 className="text-lg font-bold mb-3 text-black">Skills</h3>
+                <h3 className="text-xl font-bold mb-4 text-black border-b pb-2">
+                  Skills
+                </h3>
                 {data.skills.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
                     {data.skills.map((skill, i) => (
                       <span
                         key={i}
-                        className="bg-blue-100 text-blue-800 px-3 py-1 rounded text-sm"
+                        className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium"
                       >
                         {skill}
                       </span>
                     ))}
                   </div>
                 ) : (
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm text-black">
-                      Add Skills (e.g. Project Management)
-                    </p>
-                    <button className="w-6 h-6 bg-gray-300 rounded-full flex items-center justify-center text-white font-bold">
-                      +
-                    </button>
-                  </div>
+                  <p className="text-sm text-gray-500">
+                    No skills detected in resume
+                  </p>
                 )}
               </div>
 
               {/* Experience Section */}
               <div>
-                <h3 className="text-lg font-bold mb-3 text-black">
+                <h3 className="text-xl font-bold mb-4 text-black border-b pb-2">
                   Experience
                 </h3>
                 {data.experience.length > 0 ? (
@@ -733,23 +859,33 @@ export default function JobApplicationPlatform() {
                     {data.experience.map((exp, i) => (
                       <div
                         key={i}
-                        className="border-l-2 border-blue-500 pl-4 py-2"
+                        className="border-l-4 border-blue-500 pl-4 py-2"
                       >
-                        <h4 className="font-semibold text-lg text-black">
+                        <h4 className="font-semibold text-lg text-black mb-1">
                           {exp.title}
                         </h4>
-                        <p className="text-sm text-gray-600 mb-1">
-                          {exp.company} {exp.period && `| ${exp.period}`}
-                        </p>
+                        <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600 mb-2">
+                          {exp.company && (
+                            <span className="font-medium">{exp.company}</span>
+                          )}
+                          {exp.period && (
+                            <>
+                              <span>•</span>
+                              <span>{exp.period}</span>
+                            </>
+                          )}
+                        </div>
                         {exp.desc && exp.desc.length > 0 && (
-                          <ul className="mt-2 space-y-1">
+                          <ul className="mt-2 space-y-2">
                             {exp.desc.map((bullet, bulletIndex) => (
                               <li
                                 key={bulletIndex}
                                 className="text-sm text-black flex items-start"
                               >
-                                <span className="mr-2">•</span>
-                                <span>{bullet}</span>
+                                <span className="mr-2 text-blue-500">•</span>
+                                <span className="leading-relaxed">
+                                  {bullet}
+                                </span>
                               </li>
                             ))}
                           </ul>
@@ -766,59 +902,63 @@ export default function JobApplicationPlatform() {
 
               {/* Education Section */}
               <div>
-                <h3 className="text-lg font-bold mb-3 text-black">Education</h3>
+                <h3 className="text-xl font-bold mb-4 text-black border-b pb-2">
+                  Education
+                </h3>
                 {data.education.length > 0 ? (
                   <div className="space-y-4">
                     {data.education.map((edu, i) => (
                       <div
                         key={i}
-                        className="border-l-2 border-green-500 pl-4 py-1"
+                        className="border-l-4 border-green-500 pl-4 py-2"
                       >
-                        <h4 className="font-semibold text-black">
+                        <h4 className="font-semibold text-black mb-1">
                           {edu.degree}
                         </h4>
-                        <p className="text-sm text-black">{edu.school}</p>
-                        <p className="text-sm text-gray-600">
-                          {edu.year} {edu.location && `| ${edu.location}`}
-                        </p>
+                        <p className="text-sm text-black mb-1">{edu.school}</p>
+                        <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
+                          {edu.year && <span>{edu.year}</span>}
+                          {edu.location && (
+                            <>
+                              {edu.year && <span>•</span>}
+                              <span>{edu.location}</span>
+                            </>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="space-y-2 text-sm text-black">
-                    <p>Add School (e.g. Boston University)</p>
-                    <p>Add Degree (e.g. Bachelors)</p>
-                    <p>Add Field of Study (e.g. Business)</p>
-                    <p>Add Your Starting Date</p>
-                    <p>Add Ending Date (or expected)</p>
-                  </div>
+                  <p className="text-sm text-gray-500">
+                    No education information found in resume
+                  </p>
                 )}
               </div>
 
               {/* Projects Section */}
               {data.projects && data.projects.length > 0 && (
                 <div>
-                  <h3 className="text-lg font-bold mb-3 text-black">
+                  <h3 className="text-xl font-bold mb-4 text-black border-b pb-2">
                     Projects
                   </h3>
                   <div className="space-y-4">
                     {data.projects.map((project, i) => (
                       <div
                         key={i}
-                        className="border-l-2 border-purple-500 pl-4 py-1"
+                        className="border-l-4 border-purple-500 pl-4 py-2"
                       >
-                        <h4 className="font-semibold text-black">
+                        <h4 className="font-semibold text-black mb-2">
                           {project.name}
                         </h4>
                         {project.description.length > 0 && (
-                          <ul className="mt-1 space-y-1">
+                          <ul className="space-y-1">
                             {project.description.map((desc, descIndex) => (
                               <li
                                 key={descIndex}
                                 className="text-sm text-black flex"
                               >
-                                <span className="mr-2">•</span>
-                                <span>{desc}</span>
+                                <span className="mr-2 text-purple-500">•</span>
+                                <span className="leading-relaxed">{desc}</span>
                               </li>
                             ))}
                           </ul>
@@ -831,28 +971,36 @@ export default function JobApplicationPlatform() {
             </div>
           </div>
 
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <h3 className="font-bold mb-4 text-black">Settings</h3>
-            <p className="text-sm text-black mb-2 cursor-pointer hover:text-blue-600">
-              Close My Account
-            </p>
-            <p className="text-sm text-black cursor-pointer hover:text-blue-600">
-              Manage Notifications
-            </p>
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+            <h3 className="font-bold mb-4 text-black">Application Status</h3>
+            <div className="flex items-center gap-2 mb-2">
+              <CheckCircle className="w-5 h-5 text-green-600" />
+              <span className="text-black">Resume successfully parsed</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <CheckCircle className="w-5 h-5 text-green-600" />
+              <span className="text-black">Application form completed</span>
+            </div>
           </div>
 
           <div className="mt-6 flex gap-4">
             <button
-              onClick={() => setPage("job")}
-              className="flex items-center gap-2 border-2 border-gray-300 px-6 py-2 rounded hover:bg-gray-50 text-black"
+              onClick={() => setPage("apply")}
+              className="flex items-center gap-2 border-2 border-gray-300 px-6 py-2 rounded hover:bg-gray-50 text-black transition-colors"
             >
-              <ArrowLeft className="w-4 h-4 text-black" /> Back to Jobs
+              <ArrowLeft className="w-4 h-4" /> Back to Application
             </button>
             <button
               onClick={downloadJSON}
-              className="flex items-center gap-2 border-2 border-gray-300 px-6 py-2 rounded hover:bg-gray-50 text-black"
+              className="flex items-center gap-2 bg-blue-800 text-white px-6 py-2 rounded hover:bg-blue-900 transition-colors"
             >
-              <Download className="w-4 h-4 text-black" /> Download Data
+              <Download className="w-4 h-4" /> Download Parsed Data
+            </button>
+            <button
+              onClick={() => setPage("job")}
+              className="flex items-center gap-2 border-2 border-gray-300 px-6 py-2 rounded hover:bg-gray-50 text-black transition-colors"
+            >
+              Back to Jobs
             </button>
           </div>
         </div>
